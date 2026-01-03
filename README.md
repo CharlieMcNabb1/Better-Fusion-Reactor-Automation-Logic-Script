@@ -1,4 +1,4 @@
-# Better-Fusion-Reactor-Automation-Logic-Script
+
 # Fusion Reactor Controller (ComputerCraft)
 
 A compact ComputerCraft controller for the "Better Fusion Reactors" mod that automatically adjusts Control Rods (CR) and fuel injection to maximize efficiency while keeping reactor error and heat multiplier under control.
