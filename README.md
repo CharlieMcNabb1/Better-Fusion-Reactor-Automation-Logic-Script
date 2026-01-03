@@ -15,7 +15,7 @@ A compact ComputerCraft controller for the "Better Fusion Reactors" mod that aut
 **Requirements**
 - Minecraft with ComputerCraft (or CC: Tweaked) and the Better Fusion Reactors mod
 - The reactor logic adapter peripheral accessible as the `bottom` peripheral (or update `peripheral.wrap` in the script)
-- Place `reactorController.lua` on a ComputerCraft computer and run it from the computer.
+- Place `reactorController.lua` on a ComputerCraft advanced computer and run it from the computer.
 
 Installation
 - Copy `reactorController.lua` to your ComputerCraft advanced computer using "pastebin get RwYiFcpk reactorController.lua" inside of the advanced computer.
