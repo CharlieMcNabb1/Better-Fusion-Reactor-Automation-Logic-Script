@@ -54,11 +54,8 @@ Safety
 Files
 - Controller: [reactorController.lua](reactorController.lua)
 
-License
-- Suggested: MIT. Feel free to change to your preferred license.
 
-Contact / Contributions
-- Open an issue or PR with improvements, tunings, or UI tweaks.
 
-Changelog
-- Initial README created to document the controller behavior and tuning knobs.
+
+
+
