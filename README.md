@@ -18,12 +18,12 @@ A compact ComputerCraft controller for the "Better Fusion Reactors" mod that aut
 - Place `reactorController.lua` on a ComputerCraft computer and run it from the computer.
 
 Installation
-- Copy `reactorController.lua` to your ComputerCraft computer.
+- Copy `reactorController.lua` to your ComputerCraft computer using "pastebin get RwYiFcpk reactorController.lua".
 - Ensure the Reactor Logic Adapter is attached on the bottom side (or change the wrap side in the script).
 - Start the controller with:
 
 ```bash
-lua reactorController.lua
+reactorController.lua
 ```
 
 Usage
