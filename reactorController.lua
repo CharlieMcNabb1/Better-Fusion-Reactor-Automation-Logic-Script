@@ -135,12 +135,13 @@ while running do
             -- Start with efficiency-based sign
             local sign = effSign
 
-            -- Prefer using efficiency change (lastEff) to detect whether previous move helped.
+            -- Use efficiency change (EF) alone to decide if previous move helped.
             if lastEff ~= nil and lastAdj ~= 0 then
                 if eff > lastEff then
                     -- Efficiency improved: grow step and keep direction
                     stepSize = math.min(maxStep, stepSize + 2)
                     mode = "IMPROVING"
+                    sign = s(lastAdj)
                 else
                     -- Efficiency worsened: reverse or nudge opposite, with cooldown
                     if reversalCooldown == 0 then
@@ -155,28 +156,10 @@ while running do
                         mode = "COOLDOWN"
                     end
                 end
-
-            -- Fallback to error-based trend detection if we don't have lastEff
-            elseif lastErr ~= nil and lastAdj ~= 0 then
-                if errLevel < lastErr then
-                    stepSize = math.min(maxStep, stepSize + 2)
-                    mode = "IMPROVING"
-                else
-                    if reversalCooldown == 0 then
-                        direction = -direction
-                        sign = -s(lastAdj)
-                        stepSize = math.max(minStep, math.floor(stepSize / 2))
-                        reversalCooldown = reversalCooldownMax
-                        mode = "REVERSING"
-                    else
-                        sign = -s(lastAdj)
-                        stepSize = math.max(minStep, math.floor(stepSize / 2))
-                        mode = "COOLDOWN"
-                    end
-                end
             else
-                -- First adjustment: use efficiency sign scaled by current direction
+                -- No efficiency history: perform a small probe using efficiency sign * current direction
                 sign = effSign * direction
+                mode = "PROBING"
             end
 
             -- Proportional action based on efficiency gap (main control)
@@ -215,68 +198,89 @@ while running do
             end
         end
 
-        -- Active Injection Optimization: search for sweet spot that minimizes HM
-        -- Goal: keep plasma temp near targetPlasmaTemp (3200K) to minimize heat multiplier
+        -- Improved Injection Optimization: bias toward lower injection when heat rises
+        -- Goal: keep plasma near `targetPlasmaTemp` while actively preventing casing/heat-multiplier growth
         local injectionNeeded = curInj
         local tempError = curTemp - targetPlasmaTemp
         local tempStability = math.abs(tempError)
-        
-        -- If reactor is in critical state, skip injection search and just stabilize
+
+        -- Read heat multiplier if available (some RLA implementations provide this)
+        local heatMult = nil
+        if type(rla.getHeatMultiplier) == "function" then
+            local ok, val = pcall(rla.getHeatMultiplier, rla)
+            if ok then heatMult = val end
+        end
+
+        -- Compute a small heat penalty based on case temp trend, absolute case temp and heat multiplier
+        local heatPenalty = 0
+        if caseTemp ~= nil and lastCaseTemp ~= nil then
+            if caseTemp > lastCaseTemp + 150 then heatPenalty = heatPenalty + 1 end
+        end
+        if caseTemp ~= nil and caseTemp > 5000 then heatPenalty = heatPenalty + 1 end
+        if heatMult ~= nil and heatMult > 1.05 then heatPenalty = heatPenalty + 1 end
+
+        -- Emergency safety: if casing already hot, force injection down quickly
+        local emergencyReduce = false
+        if caseTemp ~= nil and caseTemp > 8000 then
+            emergencyReduce = true
+        end
+
         if errLevel >= 50 then
-            -- Critical: only increase injection if plasma is too hot
-            if curTemp > targetPlasmaTemp + 800 and curInj < 9 then
+            -- Critical: stabilize plasma first, but still prefer lowering injection when casing heats
+            if curTemp > targetPlasmaTemp + 800 and curInj < 9 and not emergencyReduce then
                 injectionNeeded = math.min(curInj + 1, 9)
+            elseif emergencyReduce then
+                injectionNeeded = math.max(minInj, curInj - 2)
             end
         else
-            -- Normal mode: actively search for optimal injection
-            if tempTrend == 0 and tempStability < 250 then
-                -- Plasma is stable near target: hold injection and record as "good"
+            -- Normal mode: prefer lower injection if heat penalty exists
+            if tempTrend == 0 and tempStability < 200 then
                 injectionCyclesSinceChange = injectionCyclesSinceChange + 1
                 injectionNeeded = curInj
-                
-                -- Update best injection if this is better
+
                 if tempStability < bestTempStability then
                     bestTempStability = tempStability
                     bestInjection = curInj
-                    injectionLockCycles = 10  -- lock longer when we find a good spot
+                    injectionLockCycles = 10
                 end
-                
-                -- After N cycles of stability, try a small adjustment to search
+
                 if injectionCyclesSinceChange >= injectionLockCycles then
-                    injectionSearchDir = (tempError > 0) and 1 or -1  -- if plasma hot, reduce inj
-                    if injectionSearchDir == 1 and curInj < 9 then
+                    -- Probe: only increase if no heat penalty, otherwise probe downward
+                    if heatPenalty == 0 and curInj < 9 then
                         injectionNeeded = curInj + 1
                         injectionCyclesSinceChange = 0
-                    elseif injectionSearchDir == -1 and curInj > minInj then
-                        injectionNeeded = curInj - 1
+                    elseif curInj > minInj then
+                        injectionNeeded = curInj - 2
                         injectionCyclesSinceChange = 0
                     end
                 end
             else
-                -- Plasma unstable: adjust injection toward target temp
                 injectionCyclesSinceChange = 0
-                
+
                 if curTemp > targetPlasmaTemp + 150 then
-                    -- Too hot: reduce injection
-                    if curInj > minInj then
-                        injectionNeeded = curInj - 1
-                    end
+                    -- Too hot: reduce injection more aggressively when heat penalty present
+                    local reduceBy = 1 + heatPenalty
+                    if emergencyReduce then reduceBy = math.max(reduceBy, 2) end
+                    injectionNeeded = math.max(minInj, curInj - reduceBy)
                 elseif curTemp < targetPlasmaTemp - 150 then
-                    -- Too cold: increase injection
-                    if curInj < 9 then
+                    -- Too cold: only increase if low heat penalty
+                    if heatPenalty == 0 and curInj < 9 then
                         injectionNeeded = curInj + 1
+                    else
+                        injectionNeeded = curInj
                     end
                 else
-                    -- Close to target: hold steady
                     injectionNeeded = curInj
                 end
             end
         end
-        
+
         if injectionNeeded ~= curInj then
-            -- Ensure injection rate is even
-            injectionNeeded = math.floor(injectionNeeded / 2) * 2
-            rla.setInjectionRate(injectionNeeded)
+            -- Keep injection even and within bounds
+            injectionNeeded = math.floor(math.max(minInj, math.min(9, injectionNeeded)) / 2) * 2
+            if injectionNeeded ~= curInj then
+                rla.setInjectionRate(injectionNeeded)
+            end
         end
 
         lastTemp = curTemp
